@@ -1,0 +1,46 @@
+---
+    - name: "Add users to the enviroment"
+      user:
+        user: "{{item.value.name}}"
+        groups: "{{ item.value.groups }}{% if item.value.admin is defined and ansible_os_family == 'Debian' %}sudo{% elif item.value.admin is defined and ansible_os_family == 'RedHat' %}wheel{% endif %}"
+#        password: "{% if item.value.pass_hash is defined %}{{item.value.pass_hash}}{% else %}{{ 'changeme' | password_hash('sha512') }}{% endif %}"
+#        password: "{{ lookup('password', '~/password length=15 chars=ascii_letters') | password_hash('sha512') }}"
+        password: ""
+        createhome: yes
+        uid: "{{item.value.uid}}"
+        state: "{{item.value.state}}"
+        remove: "{% if item.value.state == 'absent' %}yes{% else %}no{% endif %}"
+        update_password: on_create
+      register: users_added
+      with_dict: "{{server_cluster}}"
+
+    - name: debug
+      debug: 
+        var: users_added
+
+    - name: expire password when newly created
+      shell: "chage -d 0 {{item.name}}"
+      with_items: "{{ users_added.results }}"
+      ignore_errors: true #Without testing is impossible if user doesn't exist
+      when: item.changed is true
+
+    - name: "Add public key to authorized file"
+      authorized_key:
+        user: "{{item.value.name}}"
+        key: "{{item.value.public_key}}"
+        path: "/etc/ssh/authorized_keys/{{item.value.name}}"
+        state: "{{item.value.state}}"
+        manage_dir: False
+      with_dict: "{{server_cluster}}"
+      ignore_errors: true #Without testing is impossible if user doesn't exist
+      when: item.value.public_key is defined
+
+    - name: "Set permissions on authorized_keys file"
+      file:
+        path: "/etc/ssh/authorized_keys/{{item.value.name}}"
+        state: file
+        owner: root
+        mode: 0444
+      with_dict: "{{server_cluster}}"
+      ignore_errors: true #Without testing is impossible if user doesn't exist
+      when: item.value.public_key is defined
